@@ -1,0 +1,191 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+ 
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── ENUMS ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  CITIZEN
+  RESPONDER
+  ADMIN
+}
+
+enum Status {
+  REPORTED
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// ─── MODELS ──────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String    @db.VarChar(100)
+  email         String    @unique @db.VarChar(255)
+  password      String    @db.VarChar(255)
+  role          Role      @default(CITIZEN)
+  avatar        String?
+  phone         String?   @db.VarChar(20)
+  emailVerified DateTime?
+  deletedAt     DateTime?
+
+  // Relations
+  problems    Problem[]  @relation("AuthoredProblems")
+  claims      Problem[]  @relation("ClaimedProblems")
+  comments    Comment[]
+  votes       Vote[]
+  updates     Update[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([role])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Category {
+  id    Int    @id @default(autoincrement())
+  name  String @unique @db.VarChar(50)
+  icon  String @db.VarChar(10)
+  color String @db.VarChar(7)   // hex color e.g. #FF6B35
+
+  problems Problem[]
+
+  @@map("categories")
+}
+
+model Problem {
+  id          String    @id @default(cuid())
+  title       String    @db.VarChar(120)
+  description String    @db.VarChar(2000)
+  address     String    @db.VarChar(255)
+  latitude    Float
+  longitude   Float
+  status      Status    @default(REPORTED)
+  severity    Severity  @default(MEDIUM)
+  deletedAt   DateTime?
+
+  // Foreign keys
+  categoryId  Int
+  authorId    String
+  claimedById String?
+
+  // Relations
+  category  Category  @relation(fields: [categoryId], references: [id])
+  author    User      @relation("AuthoredProblems", fields: [authorId], references: [id])
+  claimedBy User?     @relation("ClaimedProblems", fields: [claimedById], references: [id])
+
+  images   ProblemImage[]
+  comments Comment[]
+  votes    Vote[]
+  updates  Update[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexes — every common query pattern covered
+  @@index([status])
+  @@index([categoryId])
+  @@index([authorId])
+  @@index([claimedById])
+  @@index([severity])
+  @@index([deletedAt])
+  @@index([createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])   // latest feed filtered by status
+  @@index([status, severity])                // critical open problems
+  @@index([latitude, longitude])             // nearby queries
+  @@map("problems")
+}
+
+model ProblemImage {
+  id        String @id @default(cuid())
+  url       String                          // Cloudinary delivery URL
+  publicId  String                          // Cloudinary public_id for deletion
+  width     Int?
+  height    Int?
+  order     Int    @default(0)              // display order
+
+  problemId String
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([problemId])
+  @@map("problem_images")
+}
+
+model Comment {
+  id         String    @id @default(cuid())
+  content    String    @db.VarChar(1000)
+  isOfficial Boolean   @default(false)      // true for responder/admin comments
+  deletedAt  DateTime?
+
+  problemId String
+  userId    String
+
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([problemId])
+  @@index([userId])
+  @@index([problemId, createdAt(sort: Asc)])  // fetch comments in order
+  @@map("comments")
+}
+
+model Vote {
+  id        String @id @default(cuid())
+  userId    String
+  problemId String
+
+  user    User    @relation(fields: [userId], references: [id])
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, problemId])           // one vote per user per problem
+  @@index([problemId])                    // count votes per problem fast
+  @@index([userId])                       // check if user voted
+  @@map("votes")
+}
+
+model Update {
+  id        String @id @default(cuid())
+  message   String @db.VarChar(500)
+  status    Status                        // what status was it changed TO
+
+  problemId String
+  authorId  String
+
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([problemId])
+  @@index([problemId, createdAt(sort: Asc)])  // timeline in order
+  @@map("updates")
+}
